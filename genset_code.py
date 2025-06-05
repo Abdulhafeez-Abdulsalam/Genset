@@ -1,14 +1,11 @@
 import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 # Page title
 st.title("Mini-Grid Project Financial Model")
 
 # Constants
-gen_maxloading = 0.75
 load_factor = 0.8
-power_factor = 0.8
 days_monthly = 30.4
 
 # User Inputs
@@ -43,15 +40,26 @@ daily_fuel_consumption = daily_energy_kwh * consumption_rate
 monthly_fuel_consumption = daily_fuel_consumption * days_monthly
 annual_fuel_consumption = daily_fuel_consumption * 365
 
-daily_fuel_cost = daily_fuel_consumption * fuel_price
-monthly_fuel_cost = daily_fuel_cost * days_monthly
-annual_fuel_cost = daily_fuel_cost * 365
+# CAPEX: Only generator and installation
+capex = gen_cost + installation_cost
 
-capex = gen_cost + installation_cost + logistics_cost
-monthly_opex = monthly_fuel_cost + om_monthly_cost
-total_cost_over_ppa_years = capex + (monthly_opex * 12 * ppa_lifetime)
+# OPEX: Monthly costs (O&M, logistics) * 12 * years (not escalated) + escalated fuel cost
+annual_opex_fixed = (om_monthly_cost + logistics_cost) * 12
 
-tariff = total_cost_over_ppa_years / (daily_energy_kwh * 365 * ppa_lifetime)
+# Escalated annual fuel costs
+annual_fuel_costs = []
+for year in range(1, ppa_lifetime + 1):
+    price = fuel_price * ((1 + fuel_escalation_rate) ** (year - 1))
+    cost = price * annual_fuel_consumption
+    annual_fuel_costs.append(cost)
+total_fuel_cost = sum(annual_fuel_costs)
+
+# Total cost over PPA years
+total_cost_over_ppa_years = capex + (annual_opex_fixed * ppa_lifetime) + total_fuel_cost
+
+# Tariff calculation (avoid zero division)
+total_kwh = daily_energy_kwh * 365 * ppa_lifetime
+tariff = total_cost_over_ppa_years / total_kwh if total_kwh > 0 else 0
 
 unit = "liters" if fuel_type == "diesel" else "kg"
 
@@ -61,29 +69,18 @@ st.write(f"**Daily Fuel Consumption**: {daily_fuel_consumption:.2f} {unit}")
 st.write(f"**Monthly Fuel Consumption**: {monthly_fuel_consumption:.2f} {unit}")
 st.write(f"**Annual Fuel Consumption**: {annual_fuel_consumption:.2f} {unit}")
 
-st.write(f"**Daily Fuel Cost**: ₦{daily_fuel_cost:,.2f}")
-st.write(f"**Monthly Fuel Cost**: ₦{monthly_fuel_cost:,.2f}")
-st.write(f"**Annual Fuel Cost**: ₦{annual_fuel_cost:,.2f}")
-st.write(f"**Your Estimated Tariff**: ₦{tariff:,.2f} per kWh")
+st.write(f"**Your Estimated Tariff (including escalation)**: ₦{tariff:,.2f} per kWh")
 
-# Escalated fuel prices and plotting
-annual_prices = []
-for year in range(1, ppa_lifetime + 1):
-    price = fuel_price * ((1 + fuel_escalation_rate) ** (year - 1))
-    annual_prices.append(price)
-
-total_fuel_cost = sum(annual_prices)
-
-st.subheader("Annual Fuel Price Escalation")
-for i, price in enumerate(annual_prices, 1):
-    st.write(f"Year {i}: ₦{price:.2f}")
-st.write(f"**Total Fuel Price Over {ppa_lifetime} Years**: ₦{total_fuel_cost:,.2f}")
+st.subheader("Escalated Annual Fuel Costs")
+for i, cost in enumerate(annual_fuel_costs, 1):
+    st.write(f"Year {i}: ₦{cost:,.2f}")
+st.write(f"**Total Escalated Fuel Cost Over {ppa_lifetime} Years**: ₦{total_fuel_cost:,.2f}")
 
 # Plot
-fig, ax = plt.subplots()
-ax.plot(range(1, ppa_lifetime + 1), annual_prices, marker='o', linestyle='-', color='blue')
-ax.set_title(f"Annual {fuel_type.capitalize()} Price Over {ppa_lifetime} Years")
-ax.set_xlabel("Year")
-ax.set_ylabel("Fuel Price (₦)")
-ax.grid(True)
-st.pyplot(fig)
+# fig, ax = plt.subplots()
+# ax.plot(range(1, ppa_lifetime + 1), annual_fuel_costs, marker='o', linestyle='-', color='blue')
+# ax.set_title(f"Annual {fuel_type.capitalize()} Fuel Cost Over {ppa_lifetime} Years")
+# ax.set_xlabel("Year")
+# ax.set_ylabel("Annual Fuel Cost (₦)")
+# ax.grid(True)
+# st.pyplot(fig)
