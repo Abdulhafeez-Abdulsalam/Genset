@@ -1,9 +1,7 @@
 import streamlit as st
-
 st.title("Mini-Grid Project Financial Model")
 load_factor = 0.8
 days_monthly = 30.4
-
 avg_load = st.number_input('Enter the average load (kW):', min_value=0.0, value=100.0)
 peak_load = st.number_input('Enter the peak load (kW):', min_value=0.0, value=150.0)
 operating_hrs = st.number_input('Enter the genset running hours (hrs):', min_value=0.0, value=8.0)
