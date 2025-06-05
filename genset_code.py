@@ -1,5 +1,4 @@
 import streamlit as st
-# import matplotlib.pyplot as plt
 
 # Page title
 st.title("Mini-Grid Project Financial Model")
@@ -75,12 +74,3 @@ st.subheader("Escalated Annual Fuel Costs")
 for i, cost in enumerate(annual_fuel_costs, 1):
     st.write(f"Year {i}: ₦{cost:,.2f}")
 st.write(f"**Total Escalated Fuel Cost Over {ppa_lifetime} Years**: ₦{total_fuel_cost:,.2f}")
-
-# Plot
-# fig, ax = plt.subplots()
-# ax.plot(range(1, ppa_lifetime + 1), annual_fuel_costs, marker='o', linestyle='-', color='blue')
-# ax.set_title(f"Annual {fuel_type.capitalize()} Fuel Cost Over {ppa_lifetime} Years")
-# ax.set_xlabel("Year")
-# ax.set_ylabel("Annual Fuel Cost (₦)")
-# ax.grid(True)
-# st.pyplot(fig)
