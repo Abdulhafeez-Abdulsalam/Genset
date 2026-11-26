@@ -1,13 +1,17 @@
 import streamlit as st
 st.title("Mini-Grid Project Financial Model")
-load_factor = 0.8
 days_monthly = 30.4
 avg_load = st.number_input('Enter the average load (kW):', min_value=0.0, value=100.0)
 peak_load = st.number_input('Enter the peak load (kW):', min_value=0.0, value=150.0)
 operating_hrs = st.number_input('Enter the genset running hours (hrs):', min_value=0.0, value=8.0)
 ppa_lifetime = st.number_input('Enter the number of PPA years (years):', min_value=1, value=10)
 
-daily_energy_kwh = peak_load * load_factor * operating_hrs
+if avg_load > peak_load:
+    st.warning("Average load is higher than peak load. Check your inputs.")
+
+# Energy delivered is the average load sustained over the running hours.
+daily_energy_kwh = avg_load * operating_hrs
+load_factor = avg_load / peak_load if peak_load > 0 else 0
 
 fuel_type = st.selectbox("Select fuel type:", ["diesel", "gas"])
 fuel_consumption_rates = {
@@ -40,6 +44,8 @@ tariff = total_cost_over_ppa_years / total_kwh if total_kwh > 0 else 0
 
 unit = "liters" if fuel_type == "diesel" else "kg"
 st.subheader("Results")
+st.write(f"**Daily Energy Delivered**: {daily_energy_kwh:,.2f} kWh")
+st.write(f"**Load Factor (average ÷ peak)**: {load_factor:.0%}")
 st.write(f"**Daily Fuel Consumption**: {daily_fuel_consumption:.2f} {unit}")
 st.write(f"**Monthly Fuel Consumption**: {monthly_fuel_consumption:.2f} {unit}")
 st.write(f"**Annual Fuel Consumption**: {annual_fuel_consumption:.2f} {unit}")
