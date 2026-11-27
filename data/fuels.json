@@ -1,0 +1,60 @@
+{
+  "_notes": "Fuel use model: fuel per hour = a x rated kW + b x output kW. For each fuel, a + b = 3.6 / (full_load_efficiency x energy_mj_per_unit), and a = no_load_fraction x (a + b). Diesel values reproduce the HOMER manual's worked example (50 kW generator: 8.48 L/hr at 25 kW, 15.3 L/hr at 50 kW). Values marked approximate are typical figures, not measurements: replace them with your generator's spec sheet where you can.",
+  "no_load_fraction": 0.108,
+  "no_load_fraction_source": "HOMER manual example: intercept 0.033 L/hr/kW rated, slope 0.273 L/hr/kW, so 0.033 / (0.033 + 0.273) = 0.108",
+  "power_factor": 0.8,
+  "fuels": {
+    "diesel": {
+      "name": "Diesel (AGO)",
+      "unit": "L",
+      "unit_long": "litres",
+      "energy_mj_per_unit": 36.0,
+      "full_load_efficiency": 0.327,
+      "approximate": false,
+      "source": "Efficiency derived from the HOMER manual worked example (15.3 L/hr at 50 kW) with diesel at 36 MJ/L (Engineering ToolBox)",
+      "source_url": "https://support.ul-renewables.com/homer-manual-pro/generator_fuel_curve_intercept_coefficient.html"
+    },
+    "petrol": {
+      "name": "Petrol (PMS)",
+      "unit": "L",
+      "unit_long": "litres",
+      "energy_mj_per_unit": 32.0,
+      "full_load_efficiency": 0.22,
+      "approximate": true,
+      "source": "Approximate: petrol about 43-44 MJ/kg at 0.74 kg/L; efficiency typical of small spark-ignition generators",
+      "source_url": ""
+    },
+    "lpg": {
+      "name": "LPG (cooking gas)",
+      "unit": "kg",
+      "unit_long": "kilograms",
+      "energy_mj_per_unit": 46.0,
+      "full_load_efficiency": 0.25,
+      "approximate": true,
+      "source": "Approximate: LPG 46-51 MJ/kg (lower end used); efficiency typical of gas spark-ignition generators",
+      "source_url": ""
+    },
+    "cng": {
+      "name": "CNG (compressed natural gas)",
+      "unit": "scm",
+      "unit_long": "standard cubic metres",
+      "energy_mj_per_unit": 34.0,
+      "full_load_efficiency": 0.28,
+      "approximate": true,
+      "source": "Approximate: natural gas about 37 MJ/scm gross, about 34 MJ/scm net; efficiency typical of gas generators",
+      "source_url": ""
+    },
+    "pipeline_gas": {
+      "name": "Pipeline natural gas",
+      "unit": "scm",
+      "unit_long": "standard cubic metres",
+      "energy_mj_per_unit": 34.0,
+      "full_load_efficiency": 0.30,
+      "approximate": true,
+      "source": "Approximate: same gas as CNG; larger pipeline-fed gas generators are usually more efficient",
+      "source_url": ""
+    }
+  },
+  "mmbtu_per_scm": 0.0354,
+  "mmbtu_per_scm_source": "Approximate: natural gas 37.3 MJ/scm gross (FAO) / 1,055.06 MJ per MMBtu"
+}

@@ -1,58 +1,197 @@
-import streamlit as st
-st.title("Mini-Grid Project Financial Model")
-days_monthly = 30.4
-avg_load = st.number_input('Enter the average load (kW):', min_value=0.0, value=100.0)
-peak_load = st.number_input('Enter the peak load (kW):', min_value=0.0, value=150.0)
-operating_hrs = st.number_input('Enter the genset running hours (hrs):', min_value=0.0, value=8.0)
-ppa_lifetime = st.number_input('Enter the number of PPA years (years):', min_value=1, value=10)
+"""Streamlit UI for the generator power cost calculator. All maths lives in genset/."""
 
+import streamlit as st
+
+from genset import fuels as F
+from genset import model as M
+from genset.prices import PriceEntry, grid_tariffs, load_prices
+
+BAND_HOURS = {"A": 20, "B": 16, "C": 12, "D": 8, "E": 4}  # minimum supply hours a day, per NERC orders
+
+st.set_page_config(page_title="Generator Power Cost", page_icon="⚡")
+
+
+@st.cache_data
+def reference_data():
+    return F.load_fuel_data(), load_prices()
+
+
+fuel_data, prices = reference_data()
+
+
+def naira(value: float, decimals: int = 0) -> str:
+    return f"₦{value:,.{decimals}f}"
+
+
+def show_source(entry: PriceEntry) -> None:
+    """Caption under an input that starts from a reference price."""
+    st.caption(
+        f"Starts at {entry.value:,.2f} {entry.unit}: {entry.label}, {entry.region}. "
+        f"As of {entry.as_of:%d %b %Y}, [{entry.source_name}]({entry.source_url})."
+        + (f" {entry.note}" if entry.note else "")
+    )
+    if not entry.primary_source:
+        st.caption("Unconfirmed: from news reports, not an official source. Use the price you actually pay.")
+    if entry.is_stale():
+        if entry.method == "nerc_ocr":
+            st.warning(f"This comes from the latest NERC order found, which took effect {entry.age_days()} days ago. "
+                       "Check your bill in case the tariff has changed since.")
+        else:
+            st.warning(f"This reference price is {entry.age_days()} days old. Check the current price before relying on it.")
+
+
+st.title("Generator Power Cost Calculator")
+st.write(
+    "Work out what generator power costs per kWh, the flat tariff that recovers every cost "
+    "over a contract term, and how that compares with grid electricity."
+)
+
+# ---------- 1. Demand ----------
+st.header("1. Electricity demand")
+avg_load = st.number_input("Average load (kW)", min_value=0.0, value=100.0,
+                           help="The typical power drawn while the generator runs.")
+peak_load = st.number_input("Peak load (kW)", min_value=0.0, value=150.0,
+                            help="The highest power drawn at any moment.")
+operating_hrs = st.number_input("Generator running hours per day", min_value=0.0, max_value=24.0, value=8.0)
+years = st.number_input("Years to plan for (for example, the power purchase agreement term)",
+                        min_value=1, max_value=40, value=10)
 if avg_load > peak_load:
     st.warning("Average load is higher than peak load. Check your inputs.")
 
-# Energy delivered is the average load sustained over the running hours.
-daily_energy_kwh = avg_load * operating_hrs
-load_factor = avg_load / peak_load if peak_load > 0 else 0
+daily_energy = M.daily_energy_kwh(avg_load, operating_hrs)
 
-fuel_type = st.selectbox("Select fuel type:", ["diesel", "gas"])
-fuel_consumption_rates = {
-    "diesel": 0.3,  # liters per kWh
-    "gas": 0.2     # kg per kWh
-}
-consumption_rate = fuel_consumption_rates[fuel_type]
-gen_cost = st.number_input(f"Enter total cost of {fuel_type} generator (₦):", min_value=0.0)
-logistics_cost = st.number_input(f"Enter monthly logistics cost (₦):", min_value=0.0)
-om_monthly_cost = st.number_input(f"Enter monthly operation & maintenance cost (₦):", min_value=0.0)
-installation_cost = st.number_input(f"Enter installation cost (₦):", min_value=0.0)
-fuel_price = st.number_input(f"Enter {fuel_type} price per unit (₦):", min_value=0.0)
-fuel_escalation_rate = st.number_input(f"Enter annual escalation rate (%)", min_value=0.0) / 100
+# ---------- 2. Generator and fuel ----------
+st.header("2. Generator and fuel")
+fuel_key = st.selectbox("Fuel", list(fuel_data.fuels), format_func=lambda k: fuel_data.fuels[k].name)
+fuel = fuel_data.fuels[fuel_key]
+unit = fuel.unit
 
-daily_fuel_consumption = daily_energy_kwh * consumption_rate
-monthly_fuel_consumption = daily_fuel_consumption * days_monthly
-annual_fuel_consumption = daily_fuel_consumption * 365
-capex = gen_cost + installation_cost
-annual_opex_fixed = (om_monthly_cost + logistics_cost) * 12
-annual_fuel_costs = []
-for year in range(1, ppa_lifetime + 1):
-    price = fuel_price * ((1 + fuel_escalation_rate) ** (year - 1))
-    cost = price * annual_fuel_consumption
-    annual_fuel_costs.append(cost)
-total_fuel_cost = sum(annual_fuel_costs)
+kva = st.number_input("Generator size (kVA, from the nameplate)", min_value=0.0, value=200.0, step=5.0)
+rated = F.rated_kw(kva, fuel_data.power_factor)
+if kva > 0 and peak_load > rated:
+    st.warning(
+        f"Peak load ({peak_load:,.0f} kW) is more than a {kva:,.0f} kVA generator can supply "
+        f"(about {rated:,.0f} kW at a {fuel_data.power_factor} power factor)."
+    )
 
-total_cost_over_ppa_years = capex + (annual_opex_fixed * ppa_lifetime) + total_fuel_cost
-total_kwh = daily_energy_kwh * 365 * ppa_lifetime
-tariff = total_cost_over_ppa_years / total_kwh if total_kwh > 0 else 0
+# Fuel price
+if fuel_key == "pipeline_gas":
+    gas_unit = st.radio("Gas price is quoted in", ["US$ per MMBtu", "₦ per scm"], horizontal=True)
+    if gas_unit == "US$ per MMBtu":
+        gas_ref, fx_ref = prices.get("pipeline_gas_usd_mmbtu"), prices.get("naira_per_usd")
+        usd = st.number_input("Gas price (US$ per MMBtu)", min_value=0.0, step=0.1,
+                              value=gas_ref.value if gas_ref else 3.0)
+        if gas_ref:
+            show_source(gas_ref)
+        fx = st.number_input("Exchange rate (₦ per US$)", min_value=0.0, step=10.0,
+                             value=fx_ref.value if fx_ref else 1400.0)
+        if fx_ref:
+            show_source(fx_ref)
+        fuel_price = F.usd_per_mmbtu_to_naira_per_scm(usd, fx, fuel_data.mmbtu_per_scm)
+        st.caption(f"That is {naira(fuel_price, 2)} per scm, using {fuel_data.mmbtu_per_scm} MMBtu per scm (approximate).")
+    else:
+        fuel_price = st.number_input("Gas price (₦ per scm)", min_value=0.0, value=0.0, step=10.0)
+else:
+    ref = prices.get(fuel_key)
+    fuel_price = st.number_input(f"{fuel.name} price (₦ per {unit})", min_value=0.0, step=10.0,
+                                 value=ref.value if ref else 0.0, key=f"price_{fuel_key}")
+    if ref:
+        show_source(ref)
+fuel_escalation = st.number_input("Expected yearly rise in fuel price (%)", min_value=0.0, value=0.0) / 100
 
-unit = "liters" if fuel_type == "diesel" else "kg"
-st.subheader("Results")
-st.write(f"**Daily Energy Delivered**: {daily_energy_kwh:,.2f} kWh")
-st.write(f"**Load Factor (average ÷ peak)**: {load_factor:.0%}")
-st.write(f"**Daily Fuel Consumption**: {daily_fuel_consumption:.2f} {unit}")
-st.write(f"**Monthly Fuel Consumption**: {monthly_fuel_consumption:.2f} {unit}")
-st.write(f"**Annual Fuel Consumption**: {annual_fuel_consumption:.2f} {unit}")
+# Fuel use
+mode = st.radio(
+    "How should fuel use be worked out?",
+    ["Estimate from generator size and load", "I know how much fuel I buy", "Fixed amount per kWh"],
+)
+if mode == "Estimate from generator size and load":
+    with st.expander("Fuel-use assumptions" + (" (approximate)" if fuel.approximate else "")):
+        efficiency = st.number_input("Full-load efficiency (%)", min_value=1.0, max_value=60.0,
+                                     value=fuel.full_load_efficiency * 100, key=f"eff_{fuel_key}") / 100
+        energy = st.number_input(f"Energy content (MJ per {unit})", min_value=1.0,
+                                 value=fuel.energy_mj_per_unit, key=f"mj_{fuel_key}")
+        st.caption(f"Source: {fuel.source}" + (f" ([link]({fuel.source_url}))" if fuel.source_url else ""))
+        st.caption("Replace these with your generator's spec sheet figures if you have them.")
+    if kva <= 0:
+        st.error("Enter the generator size to estimate fuel use.")
+    daily_fuel = F.daily_fuel_estimate(
+        kva=kva, avg_load_kw=avg_load, hours=operating_hrs, energy_mj_per_unit=energy,
+        efficiency=efficiency, no_load_fraction=fuel_data.no_load_fraction, power_factor=fuel_data.power_factor,
+    )
+elif mode == "I know how much fuel I buy":
+    col1, col2, col3 = st.columns(3)
+    in_naira = col3.radio("Measured in", [fuel.unit_long, "naira (₦)"]) == "naira (₦)"
+    amount = col1.number_input("Amount bought", min_value=0.0, value=0.0, step=10.0)
+    per = col2.radio("Per", ["day", "week"])
+    daily_fuel = F.daily_fuel_from_purchases(amount, per, in_naira, fuel_price)
+else:
+    default_rate = F.full_load_rate(fuel.energy_mj_per_unit, fuel.full_load_efficiency)
+    rate = st.number_input(f"Fuel per kWh ({unit})", min_value=0.0, value=round(default_rate, 3),
+                           step=0.01, format="%.3f", key=f"rate_{fuel_key}")
+    daily_fuel = daily_energy * rate
 
-st.write(f"**Your Estimated Tariff (including escalation)**: ₦{tariff:,.2f} per kWh")
+# ---------- 3. Costs ----------
+st.header("3. Other costs")
+gen_cost = st.number_input("Generator purchase cost (₦)", min_value=0.0, step=100000.0)
+installation_cost = st.number_input("Installation cost (₦)", min_value=0.0, step=100000.0)
+logistics_cost = st.number_input("Monthly fuel delivery and logistics cost (₦)", min_value=0.0, step=10000.0)
+om_monthly_cost = st.number_input("Monthly servicing and maintenance cost (₦)", min_value=0.0, step=10000.0)
+if gen_cost + installation_cost + logistics_cost + om_monthly_cost == 0:
+    st.info("Other costs are all ₦0, so the results below cover fuel only.")
 
-st.subheader("Escalated Annual Fuel Costs")
-for i, cost in enumerate(annual_fuel_costs, 1):
-    st.write(f"Year {i}: ₦{cost:,.2f}")
-st.write(f"**Total Escalated Fuel Cost Over {ppa_lifetime} Years**: ₦{total_fuel_cost:,.2f}")
+result = M.project_result(
+    daily_energy=daily_energy, daily_fuel=daily_fuel, fuel_price=fuel_price,
+    fuel_escalation=fuel_escalation, years=int(years), generator_cost=gen_cost,
+    installation_cost=installation_cost, monthly_om=om_monthly_cost, monthly_logistics=logistics_cost,
+)
+
+# ---------- Results ----------
+st.header("Results")
+col1, col2, col3 = st.columns(3)
+col1.metric("Energy delivered per day", f"{daily_energy:,.0f} kWh")
+col2.metric("Load factor (average ÷ peak)", f"{M.load_factor(avg_load, peak_load):.0%}")
+col3.metric(f"Fuel use per day ({unit})", f"{daily_fuel:,.1f}")
+
+col1, col2 = st.columns(2)
+col1.metric("Fuel cost per kWh (year 1)", naira(result.first_year_fuel_cost_per_kwh, 2))
+col2.metric(f"Break-even tariff over {result.years} years", naira(result.tariff, 2) + " /kWh")
+
+st.markdown(
+    f"**Fuel use:** {daily_fuel:,.1f} {unit} a day, {daily_fuel * M.DAYS_PER_MONTH:,.0f} {unit} a month, "
+    f"{daily_fuel * M.DAYS_PER_YEAR:,.0f} {unit} a year.  \n"
+    f"**Total cost over {result.years} years:** {naira(result.total_cost)} "
+    f"(upfront {naira(result.capex)}, fixed running costs {naira(result.annual_fixed_cost * result.years)}, "
+    f"fuel {naira(result.total_fuel_cost)})."
+)
+
+# Grid comparison
+st.subheader("Compared with grid electricity")
+grid = grid_tariffs(prices)
+if grid:
+    discos = list(grid)
+    col1, col2 = st.columns(2)
+    disco = col1.selectbox("Your electricity distribution company (DisCo)", discos,
+                           index=discos.index("IE") if "IE" in discos else 0)
+    bands = sorted(grid[disco])
+    band = col2.selectbox("Your tariff band", bands,
+                          format_func=lambda b: f"Band {b} (at least {BAND_HOURS[b]} hours a day)")
+    entry = grid[disco][band]
+    grid_price = st.number_input("Grid tariff to compare with (₦/kWh)", min_value=0.0,
+                                 value=entry.value, key=f"grid_{disco}_{band}")
+    show_source(entry)
+    st.caption("Some states now set their own electricity tariffs. If yours does, use the rate on your bill or prepaid receipt.")
+    if grid_price > 0 and result.tariff > 0:
+        monthly_kwh = daily_energy * M.DAYS_PER_MONTH
+        st.markdown(
+            f"Generator power costs **{naira(result.tariff, 2)}/kWh** over the term, "
+            f"**{result.tariff / grid_price:.1f} times** the grid tariff of {naira(grid_price, 2)}/kWh. "
+            f"For {monthly_kwh:,.0f} kWh a month, grid power would cost about **{naira(monthly_kwh * grid_price)}** a month, "
+            f"against an average of **{naira(monthly_kwh * result.tariff)}** a month from the generator."
+        )
+        st.caption("This assumes the grid supplies the same hours. In practice grid supply depends on your feeder.")
+else:
+    st.caption("No grid tariffs are loaded yet.")
+
+with st.expander(f"Fuel cost by year ({fuel_escalation:.0%} yearly rise)"):
+    st.table({"Year": [str(y) for y in range(1, result.years + 1)],
+              "Fuel cost": [naira(c) for c in result.annual_fuel_costs]})

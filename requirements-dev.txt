@@ -1,0 +1,9 @@
+# Everything the app needs, plus tests and the price fetcher (scripts/update_prices.py).
+# The fetcher also needs the tesseract OCR program: apt-get install tesseract-ocr
+-r requirements.txt
+pytest>=9,<10
+requests>=2.32,<3
+numpy>=2,<3
+pillow>=11
+pypdfium2>=5,<6
+pytesseract>=0.3.13,<0.4
